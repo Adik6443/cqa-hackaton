@@ -1,0 +1,19 @@
+# build
+target/
+*.class
+# IDE
+.idea/
+*.iml
+.vscode/
+# secrets: real keys and the organizers' URL live only here
+.env
+.env.*
+!.env.example
+application-local.yml
+application-secret.yml
+# raw organizer dumps (contain signed URLs)
+data/
+*.dump.json
+dev.json
+# local audio cache
+audio-cache/

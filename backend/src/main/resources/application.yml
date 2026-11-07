@@ -1,0 +1,36 @@
+spring:
+  application.name: cqa-backend
+  # reads KEY=VALUE pairs from backend/.env (the file is NOT committed)
+  config.import: optional:file:.env[.properties]
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/cqa}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
+  flyway.enabled: true
+  mvc.format.date: iso
+
+server:
+  port: 8080
+
+cqa:
+  organizer-url: ${ORGANIZER_URL:}
+  timezone: Asia/Almaty
+  cors-origins: ${CORS_ORIGINS:http://localhost:5173}
+  operators-mode: ${OPERATORS_MODE:NAME}
+  rating:
+    period-days: 30
+    min-dialogs: ${RATING_MIN_DIALOGS:5}
+  evaluation:
+    concurrency: 4
+    max-attempts: 2
+    corrections-per-criterion: 3
+  llm:
+    timeout-seconds: 90
+    anthropic-key: ${ANTHROPIC_API_KEY:}
+    anthropic-model: claude-sonnet-5-5
+    openai-key: ${OPENAI_API_KEY:}
+    openai-model: gpt-4.1
+    gemini-key: ${GEMINI_API_KEY:}
+    gemini-model: gemini-2.5-flash
+
+logging.level.kz.freedom.cqa: INFO
