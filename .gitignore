@@ -1,0 +1,11 @@
+# IDE
+.idea/
+*.iml
+.vscode/
+# secrets
+backend/src/main/resources/application-local.properties
+**/.env
+# build
+backend/target/
+frontend/node_modules/
+frontend/dist/

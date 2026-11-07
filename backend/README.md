@@ -33,6 +33,21 @@ SELECT * FROM llm_route;                                       -- какая м�
 
 Начать с нуля: удалить базу `cqa`, создать заново и перезапустить бэкенд.
 
+## Проверка через Postman
+
+Бэкенд должен быть запущен. Тело запросов: Body → raw → JSON.
+
+1. `POST http://localhost:8080/api/import?groupId=DEV` → `imported: 65` (повторно — `skipped: 65`).
+2. `POST http://localhost:8080/api/evaluations/batch`, тело `{"filter":{"groupId":"DEV"}}` → запомнить `id`.
+3. `GET  http://localhost:8080/api/evaluations/batch/1` → ждать `"status":"DONE"`.
+4. `GET  http://localhost:8080/api/conversations/p1-ru-001` → в `evaluation.results[0].id` номер результата критерия (например 1).
+5. `POST http://localhost:8080/api/criterion-results/1/appeals`, тело `{"comment":"Не согласен","desired":null}` → 201.
+   В pgAdmin: `SELECT * FROM appeal;` — появилась строка со статусом OPEN.
+6. `POST http://localhost:8080/api/appeals/1/decision`, тело
+   `{"status":"ACCEPTED","reason":"Проверено","newValue":{"value":0,"isNa":false},"addToExamples":true}` →
+   `SELECT final_total FROM evaluation WHERE conversation_id='p1-ru-001' AND is_latest;` — балл пересчитан,
+   `SELECT * FROM ai_correction;` — пример ошибки AI.
+
 ## Сдача results.json (DEV и контрольный набор)
 
 Формат по `CQA_Student_Guide_Appendix_Results.pdf`. Файл пишется в `../results/<dev|prod>/results.json`, то есть в корень репозитория рядом с `backend/`.

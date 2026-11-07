@@ -75,7 +75,7 @@ public class ChecklistService {
                 .param("n", name).param("v", next).query(Long.class).single();
         int order = 1;
         for (Criterion c : in.criteria()) {
-            String code = c.code() == null || c.code().isBlank() ? "C%02d".formatted(order) : c.code().trim();
+            String code = c.code() == null || c.code().isBlank() ? freeCode(in.criteria(), order) : c.code().trim();
             String type = c.answerType().toUpperCase();
             List<Criterion.Step> steps = "SCALE".equals(type) ? c.steps() : (c.steps() == null || c.steps().isEmpty() ? YES_NO : c.steps());
             db.sql("""
@@ -126,6 +126,16 @@ public class ChecklistService {
         }
         if (sum.compareTo(BigDecimal.valueOf(100)) != 0)
             throw ApiException.badRequest("Сумма весов должна быть 100, сейчас " + sum.stripTrailingZeros().toPlainString());
+    }
+
+    /** New criteria come without a code: take the first C<n> not used in this version. */
+    private static String freeCode(List<Criterion> all, int from) {
+        Set<String> used = new HashSet<>();
+        all.forEach(x -> { if (x.code() != null) used.add(x.code().trim()); });
+        for (int n = from; ; n++) {
+            String code = "C%02d".formatted(n);
+            if (!used.contains(code)) return code;
+        }
     }
 
     public static String fingerprint(String code, String instruction) {

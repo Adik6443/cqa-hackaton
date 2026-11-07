@@ -7,4 +7,4 @@ cqa.llm.anthropic-key=
 cqa.llm.openai-key=
 cqa.llm.gemini-key=
 
-cqa.results.team-name=QUARK
+cqa.results.team-name=Your team name
