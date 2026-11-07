@@ -18,7 +18,8 @@ public record Criterion(
         String naCondition,
         List<Step> steps,
         @JsonIgnore int sortOrder,
-        @JsonIgnore String fingerprint) {
+        @JsonIgnore String fingerprint,
+        String exportId) {      // criterion_id in results.json: contact, discovery, ...
 
     public record Step(BigDecimal value, String label) {}
 

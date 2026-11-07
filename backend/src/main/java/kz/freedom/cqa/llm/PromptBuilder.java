@@ -13,7 +13,7 @@ import java.util.stream.Collectors;
  */
 @Component
 public class PromptBuilder {
-    public static final String PROMPT_VERSION = "v1";
+    public static final String PROMPT_VERSION = "v2";
 
     public record Line(int seq, String time, String speaker, String text) {}
 
@@ -35,6 +35,7 @@ public class PromptBuilder {
                 8. explanation — 1–2 предложения на русском: что подтверждает реплика.
                 9. confidence — твоя уверенность от 0 до 1.
                 10. Не считай итоговый балл — его считает система.
+                11. Не придумывай факты. Если данных для уверенного вывода нет, выбери самое обоснованное значение, честно напиши об этом в explanation и снизь confidence.
 
                 Ответь ТОЛЬКО JSON без markdown:
                 {"criteria":[{"code":"C01","value":1,"isNa":false,"confidence":0.9,"explanation":"...","evidenceSeqs":[5]}]}
@@ -43,13 +44,10 @@ public class PromptBuilder {
 
     public String user(String channel, String language, Integer operatorStartSeq, List<Criterion> criteria,
                        List<Correction> corrections, List<Line> lines) {
+        // Order matters for cost: the part that is the same for every dialog (checklist, corrections)
+        // goes first so providers' prompt caching can reuse it; the dialog itself goes last.
         StringBuilder sb = new StringBuilder();
-        sb.append("Канал: ").append("VOICE".equals(channel) ? "звонок (расшифровка речи)" : "чат").append('\n');
-        sb.append("Язык диалога: ").append(language).append('\n');
-        if (operatorStartSeq != null) sb.append("Оператор подключился с реплики #").append(operatorStartSeq).append(". Всё до неё — бот/меню, это контекст.\n");
-        else sb.append("Реплик оператора нет.\n");
-
-        sb.append("\n=== ЧЕК-ЛИСТ ===\n");
+        sb.append("=== ЧЕК-ЛИСТ ===\n");
         for (Criterion c : criteria) {
             sb.append("\n[").append(c.code()).append("] ").append(c.title()).append(" (").append(c.section()).append(")\n");
             sb.append("Инструкция: ").append(c.instruction()).append('\n');
@@ -67,6 +65,11 @@ public class PromptBuilder {
                     .append(". Причина: ").append(x.reason()).append('\n')));
         }
 
+        sb.append("\n=== ДИАЛОГ ===\n");
+        sb.append("Канал: ").append("VOICE".equals(channel) ? "звонок (расшифровка речи)" : "чат").append('\n');
+        sb.append("Язык диалога: ").append(language).append('\n');
+        if (operatorStartSeq != null) sb.append("Оператор подключился с реплики #").append(operatorStartSeq).append(". Всё до неё — бот/меню, это контекст.\n");
+        else sb.append("Реплик оператора нет.\n");
         sb.append("\n=== СТЕНОГРАММА ===\n");
         for (Line l : lines) {
             sb.append('#').append(l.seq()).append(" [").append(l.time()).append("] ").append(l.speaker()).append(": ").append(l.text()).append('\n');

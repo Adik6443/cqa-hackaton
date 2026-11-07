@@ -56,7 +56,8 @@ public class ChecklistService {
                 .query((rs, i) -> new Criterion(rs.getString("id"), rs.getString("code"), rs.getString("title"),
                         rs.getString("section"), rs.getString("instruction"), rs.getString("answer_type"),
                         rs.getBigDecimal("weight"), rs.getBoolean("allow_na"), rs.getString("na_condition"),
-                        parseSteps(rs.getString("steps")), rs.getInt("sort_order"), rs.getString("fingerprint")))
+                        parseSteps(rs.getString("steps")), rs.getInt("sort_order"), rs.getString("fingerprint"),
+                        rs.getString("export_id")))
                 .list();
     }
 
@@ -79,14 +80,15 @@ public class ChecklistService {
             List<Criterion.Step> steps = "SCALE".equals(type) ? c.steps() : (c.steps() == null || c.steps().isEmpty() ? YES_NO : c.steps());
             db.sql("""
                     INSERT INTO criterion(checklist_version_id, code, section, sort_order, title, instruction, answer_type,
-                      weight, allow_na, na_condition, steps, fingerprint)
-                    VALUES (:v,:code,:sec,:ord,:title,:ins,:type,:w,:na,:nac,CAST(:steps AS jsonb),:fp)
+                      weight, allow_na, na_condition, steps, fingerprint, export_id)
+                    VALUES (:v,:code,:sec,:ord,:title,:ins,:type,:w,:na,:nac,CAST(:steps AS jsonb),:fp,:eid)
                     """)
                     .param("v", vid).param("code", code).param("sec", nz(c.section())).param("ord", order++)
                     .param("title", c.title()).param("ins", c.instruction()).param("type", type)
                     .param("w", "FLAG".equals(type) ? BigDecimal.ZERO : c.weight())
                     .param("na", c.allowNa()).param("nac", nz(c.naCondition()))
                     .param("steps", toJson(steps)).param("fp", fingerprint(code, c.instruction()))
+                    .param("eid", c.exportId() == null || c.exportId().isBlank() ? code.toLowerCase() : c.exportId().trim())
                     .update();
         }
         return versions().stream().filter(x -> x.id().equals(String.valueOf(vid))).findFirst().orElseThrow();
@@ -103,6 +105,7 @@ public class ChecklistService {
     private void validate(SaveInput in) {
         if (in.criteria() == null || in.criteria().isEmpty()) throw ApiException.badRequest("Нужен хотя бы один критерий");
         Set<String> codes = new HashSet<>();
+        Set<String> exportIds = new HashSet<>();
         BigDecimal sum = BigDecimal.ZERO;
         for (Criterion c : in.criteria()) {
             if (c.title() == null || c.title().isBlank()) throw ApiException.badRequest("У критерия нет названия");
@@ -116,6 +119,8 @@ public class ChecklistService {
                 if (c.weight() == null || c.weight().signum() <= 0) throw ApiException.badRequest("Вес «" + c.title() + "» должен быть > 0");
                 sum = sum.add(c.weight());
             }
+            if (c.exportId() != null && !c.exportId().isBlank() && !exportIds.add(c.exportId().trim()))
+                throw ApiException.badRequest("export_id повторяется: " + c.exportId());
             if (c.code() != null && !c.code().isBlank() && !codes.add(c.code().trim()))
                 throw ApiException.badRequest("Код критерия повторяется: " + c.code());
         }

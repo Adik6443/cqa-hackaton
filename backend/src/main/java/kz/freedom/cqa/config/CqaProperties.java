@@ -13,7 +13,15 @@ public record CqaProperties(
         String operatorsMode,
         Rating rating,
         Evaluation evaluation,
-        Llm llm) {
+        Llm llm,
+        Results results,
+        Auto auto) {
+
+    /** results.json export: dir relative to the backend working directory, team name for the file. */
+    public record Results(String dir, String teamName) {}
+
+    /** Hourly job: import new dialogs of groupId and evaluate only them. */
+    public record Auto(boolean enabled, String groupId, String cron) {}
 
     public record Rating(int periodDays, int minDialogs) {}
 

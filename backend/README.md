@@ -3,26 +3,63 @@
 Java 21+, Spring Boot 3.5, PostgreSQL (схема создаётся сама через Flyway), без JPA: SQL через `JdbcClient`.
 Формы JSON совпадают с `frontend/src/shared/api/types.ts` (ID строками, `value/isNa/points/maxPoints`).
 
-## Запуск
+## Запуск у себя (IntelliJ IDEA + pgAdmin 4)
 
-1. Создать БД в pgAdmin: `cqa`.
-2. `cp .env.example .env` и заполнить (`DB_PASSWORD`, `ORGANIZER_URL`, ключи нужных AI).
-3. `mvn spring-boot:run` → `http://localhost:8080/api/...`. Таблицы и чек-лист v1 создадутся при старте.
-4. Фронт: `VITE_USE_MOCKS=false`, `VITE_API_BASE_URL=http://localhost:8080/api`.
+1. **БД.** pgAdmin → Servers → PostgreSQL → Databases → правый клик → Create → Database → имя `cqa`. Больше ничего создавать не надо.
+2. **Пароль и ключи.** Скопируй `src/main/resources/application-local.properties.example` в `application-local.properties` (та же папка) и впиши пароль postgres, ключ AI и название команды. Этот файл в `.gitignore` и в GitHub не попадёт. Всё остальное лежит в обычном `application.properties`.
+3. **Старт.** Открой папку `backend` в IDEA как Maven-проект и запусти `CqaApplication` (или `mvn spring-boot:run`). При старте Flyway сам создаст таблицы и чек-лист v1. В логе будет `Started CqaApplication`.
+4. **Проверка в pgAdmin.** `cqa` → Schemas → public → Tables (нажми Refresh). Там появятся таблицы и `flyway_schema_history`.
+5. **Фронт.** В `frontend/.env`: `VITE_USE_MOCKS=false`, `VITE_API_BASE_URL=http://localhost:8080/api`.
 
-Без ключей всё работает на провайдере `MOCK` (демо-оценки, `simulated=true`), чтобы фронт можно было подключать сразу.
+Без ключа AI всё работает на провайдере `MOCK` (демо-оценки, `simulated=true`), но для results.json такие оценки не годятся: выгрузка их не пропустит.
+
+## Куда пишутся данные и как их смотреть в pgAdmin
+
+Всё хранится в твоей локальной БД `cqa`, каждый запрос из Postman/фронта пишет туда строки. Query Tool:
+
+```sql
+SELECT * FROM import_run ORDER BY id DESC;                    -- каждая загрузка от организаторов
+SELECT id, channel, language, conversation_date, operator_start_seq FROM conversation ORDER BY id;
+SELECT seq, speaker, text FROM message WHERE conversation_id='p1-ru-001' ORDER BY seq;
+SELECT conversation_id, status, provider, model, ai_total, final_total, final_gross_error, error_text
+  FROM evaluation WHERE is_latest ORDER BY conversation_id;    -- итог по каждому диалогу
+SELECT k.code, cr.ai_value, cr.ai_is_na, cr.final_value, cr.explanation
+  FROM criterion_result cr JOIN criterion k ON k.id=cr.criterion_id
+  JOIN evaluation e ON e.id=cr.evaluation_id WHERE e.conversation_id='p1-ru-001' AND e.is_latest ORDER BY k.sort_order;
+SELECT * FROM appeal ORDER BY id DESC;                         -- апелляции и решения ОКК
+SELECT * FROM ai_correction;                                   -- база ошибок AI
+SELECT * FROM llm_route;                                       -- какая модель на какой язык
+```
+
+Начать с нуля: удалить базу `cqa`, создать заново и перезапустить бэкенд.
+
+## Сдача results.json (DEV и контрольный набор)
+
+Формат по `CQA_Student_Guide_Appendix_Results.pdf`. Файл пишется в `../results/<dev|prod>/results.json`, то есть в корень репозитория рядом с `backend/`.
+
+```
+1. POST /api/import?groupId=DEV                      (для контроля — groupId, который дадут организаторы)
+2. POST /api/evaluations/batch   {"filter":{"groupId":"DEV"}}
+3. GET  /api/evaluations/batch/{id}                  (ждать status=DONE)
+4. POST /api/results/export?groupId=DEV&set=dev      (для контроля: groupId=<…>&set=prod)
+5. git add results && git commit && git push
+```
+
+- Не оценённые или упавшие диалоги попадают в файл со `status:"error"` и причиной, как требует PDF.
+- `source=ai` (по умолчанию) — ответ системы; `source=final` — после апелляций.
+- Если есть MOCK-оценки, ответ будет 409 (`allowSimulated=true` — только для проверки формата).
+- `write=false` — посмотреть JSON, не записывая файл.
+- В ответе есть `warnings`: например, если в prod не 10 записей.
 
 ## Безопасность — что НЕ коммитить
 
 | Что | Почему |
 |---|---|
-| `backend/.env` | пароль БД, ключи Anthropic / OpenAI / Gemini, `ORGANIZER_URL` |
-| `ORGANIZER_URL` в любом виде | содержит `sig=...` — это ключ доступа к API организаторов |
-| любые выгрузки JSON организаторов (`dev.json`, `data/`) | внутри `audio_url` с `sig=` и подписанные ссылки CRM |
+| `src/main/resources/application-local.properties` | пароль БД и ключи Anthropic / OpenAI / Gemini |
+| выгрузки JSON организаторов (`dev.json`, `data/`) | внутри подписанные ссылки на записи звонков |
 | `target/`, `.idea/` | сборка и IDE |
 
-Всё это уже в `backend/.gitignore`. Коммитить можно: `.env.example` (без значений), `application.yml` (там только `${ПЕРЕМЕННЫЕ}`).
-Ссылки на аудио отдаются фронту только по запросу `/audio` и не пишутся в код/фикстуры. Если ключ всё-таки попал в git — считать его скомпрометированным и попросить новый.
+Всё это уже в `.gitignore`. Ссылку организаторов в `application.properties` коммитить можно: организаторы разрешили в чате.
 
 ## Структура
 
@@ -36,7 +73,8 @@ conversation/ список с фильтрами и карточка диало�
 appeal/      апелляции, решение ОКК, база ошибок AI
 analytics/   дашборд, разрезы (язык/канал/длительность/день/модель/оператор), рейтинг и бонусы
 audio/       свежая ссылка на mp3 из страницы-плеера
-db/migration V1 схема, V2 чек-лист v1 + маршруты моделей
+results/     results.json для организаторов, часовой автозапуск (выключен)
+db/migration V1 схема, V2 чек-лист v1 + маршруты моделей, V3 коды criterion_id + уточнённые правила
 ```
 
 ## API
@@ -79,6 +117,9 @@ operatorId, grossError, hasOpenAppeal, groupId, model`.
 - `POST /appeals/{id}/decision` `{status:"ACCEPTED"|"REJECTED", reason, newValue, addToExamples, reviewerName?}` — при принятии пересчитывается критерий и итог (`ai_*` не меняется); при `addToExamples` случай уходит в базу ошибок AI.
 - `GET /ai-corrections`, `PATCH /ai-corrections/{id}` `{active}` — до 3 примеров на критерий подставляются в промпт (сначала того же языка).
 
+### Результаты для организаторов
+- `POST /results/export?groupId=DEV&set=dev|prod&source=ai|final&write=true&allowSimulated=false` → `{path, count, ok, errors, warnings, file}`.
+
 ### Аналитика и рейтинг
 - `GET /analytics/summary?<фильтр>` — средний балл, оценено/всего, грубые ошибки, открытые апелляции, % принятых апелляций, распределение по 0–49/50–69/70–84/85–100, слабые критерии.
 - `GET /analytics/breakdown?by=duration|language|channel|date|operator|model|group&<фильтр>` → `[{key, label, total, evaluated, avgScore, grossErrors, grossErrorRate, lowShare(<70), avgDurationSec}]`.
@@ -87,10 +128,9 @@ operatorId, grossError, hasOpenAppeal, groupId, model`.
 
 ## Проверено
 
-Юнит-тесты подсчёта баллов; прогон на временной PostgreSQL с DEV-данными: импорт 65 (повтор → 65 skipped), batch на MOCK 65/65, апелляция 100 → 90, база ошибок AI, переоценка с примером, аналитика, аудио-ссылка, 409/400/503.
+Юнит-тесты подсчёта баллов. Прогон на временной PostgreSQL: импорт 65 диалогов с настоящего API организаторов (повтор → 65 skipped), batch на MOCK 65/65, апелляция 100 → 90, база ошибок AI, переоценка с примером, аналитика, аудио-ссылка, results.json в формате 1.0, коды 400/409/503.
 
 ## Не сделано / следующий шаг
 - Реальные провайдеры не проверены вызовом: нужен ключ. Сравнить модели на 3 диалогах каждого языка.
-- Сравнение двух моделей на одном диалоге одним запросом (сейчас: переоценить с `provider=` и смотреть `breakdown?by=model`).
 - Прокси аудио через бэкенд (если плеер в браузере не пускает прямую ссылку).
-- Учёт стоимости токенов в деньгах; история старых оценок в API.
+- Стоимость в деньгах; история старых оценок в API.

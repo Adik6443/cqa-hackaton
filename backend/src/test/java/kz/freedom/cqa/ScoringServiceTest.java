@@ -16,17 +16,17 @@ class ScoringServiceTest {
 
     private static Criterion bool(String code, int w, boolean na) {
         return new Criterion(code, code, code, "S", "i", "BOOLEAN", BigDecimal.valueOf(w), na, "",
-                List.of(new Criterion.Step(BigDecimal.ONE, "Да"), new Criterion.Step(BigDecimal.ZERO, "Нет")), 0, "");
+                List.of(new Criterion.Step(BigDecimal.ONE, "Да"), new Criterion.Step(BigDecimal.ZERO, "Нет")), 0, "", "x");
     }
 
     private static Criterion scale(String code, int w, boolean na, int... steps) {
         return new Criterion(code, code, code, "S", "i", "SCALE", BigDecimal.valueOf(w), na, "",
-                java.util.Arrays.stream(steps).mapToObj(v -> new Criterion.Step(BigDecimal.valueOf(v), "")).toList(), 0, "");
+                java.util.Arrays.stream(steps).mapToObj(v -> new Criterion.Step(BigDecimal.valueOf(v), "")).toList(), 0, "", "x");
     }
 
     private static Criterion flag() {
         return new Criterion("C08", "C08", "C08", "S", "i", "FLAG", BigDecimal.ZERO, false, "",
-                List.of(new Criterion.Step(BigDecimal.ONE, "Да"), new Criterion.Step(BigDecimal.ZERO, "Нет")), 0, "");
+                List.of(new Criterion.Step(BigDecimal.ONE, "Да"), new Criterion.Step(BigDecimal.ZERO, "Нет")), 0, "", "x");
     }
 
     private static Answer v(int x) { return new Answer(BigDecimal.valueOf(x), false); }
