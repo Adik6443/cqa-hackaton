@@ -36,7 +36,7 @@ public class OrganizerClient {
         String base = props.organizerUrl();
         if (base == null || base.isBlank()) {
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "NO_ORGANIZER_URL",
-                    "ORGANIZER_URL не задан в backend/.env");
+                    "cqa.organizer-url не задан в application.properties");
         }
         String url = base.replaceAll("([?&])group_id=[^&]*&?", "$1").replaceAll("[?&]$", "");
         url += (url.contains("?") ? "&" : "?") + "group_id=" + URLEncoder.encode(groupId, StandardCharsets.UTF_8);

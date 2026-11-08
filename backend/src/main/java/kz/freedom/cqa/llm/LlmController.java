@@ -18,7 +18,7 @@ public class LlmController {
         this.db = db;
     }
 
-    /** [{provider, available, defaultModel}] - available=false means no API key in .env */
+    /** [{provider, available, defaultModel}] - available=false means no API key in application-local.properties */
     @GetMapping("/providers")
     public List<Map<String, Object>> providers() {
         return router.providers();

@@ -4,7 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.ZoneId;
 
-/** All settings from application.yml (section "cqa"). Secrets come from .env / environment. */
+/** All settings from application.properties (prefix "cqa"). Secrets come from application-local.properties. */
 @ConfigurationProperties(prefix = "cqa")
 public record CqaProperties(
         String organizerUrl,

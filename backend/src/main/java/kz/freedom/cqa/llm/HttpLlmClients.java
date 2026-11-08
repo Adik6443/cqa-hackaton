@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
-/** Anthropic, OpenAI and Gemini clients. Keys come from .env; an empty key disables the provider. */
+/** Anthropic, OpenAI and Gemini clients. Keys come from application-local.properties; an empty key disables the provider. */
 @Configuration
 public class HttpLlmClients {
 
