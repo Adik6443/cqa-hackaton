@@ -167,6 +167,53 @@ public class ConversationService {
                 (Integer) e.get("tokens_in"), (Integer) e.get("tokens_out"), (String) e.get("error_text"), sections, results);
     }
 
+    // ---------- history of evaluations (every re-evaluation is kept) ----------
+    public record HistoryItem(String id, boolean latest, String status, String createdAt, String finishedAt,
+                              String provider, String model, boolean simulated, int checklistVersion,
+                              BigDecimal originalScore, BigDecimal finalScore, boolean grossError,
+                              Integer tokensIn, Integer tokensOut, Integer tokensCached, BigDecimal costUsd,
+                              int appeals, String error) {}
+
+    public List<HistoryItem> history(String conversationId) {
+        if (db.sql("SELECT count(*) FROM conversation WHERE id=:id").param("id", conversationId).query(Integer.class).single() == 0)
+            throw ApiException.notFound("Диалог " + conversationId);
+        return db.sql("""
+                SELECT e.id::text AS id, e.is_latest, e.status, to_char(e.created_at AT TIME ZONE :tz, 'DD.MM.YYYY HH24:MI') AS created,
+                       to_char(e.finished_at AT TIME ZONE :tz, 'DD.MM.YYYY HH24:MI') AS finished,
+                       e.provider, e.model, e.simulated, v.version_no, e.ai_total, e.final_total, coalesce(e.final_gross_error,false) AS gross,
+                       e.tokens_in, e.tokens_out, e.tokens_cached, e.error_text,
+                       CASE WHEN p.model IS NULL OR e.tokens_in IS NULL THEN NULL ELSE round(
+                         ((e.tokens_in - coalesce(e.tokens_cached,0)) * p.input_per_mtok
+                          + coalesce(e.tokens_cached,0) * coalesce(p.cached_per_mtok, p.input_per_mtok)
+                          + coalesce(e.tokens_out,0) * p.output_per_mtok) / 1000000.0, 6) END AS cost,
+                       (SELECT count(*) FROM appeal a JOIN criterion_result cr ON cr.id=a.criterion_result_id WHERE cr.evaluation_id=e.id) AS appeals
+                FROM evaluation e
+                JOIN checklist_version v ON v.id = e.checklist_version_id
+                LEFT JOIN model_price p ON p.model = e.model
+                WHERE e.conversation_id = :id
+                ORDER BY e.created_at DESC, e.id DESC
+                """).param("id", conversationId).param("tz", "Asia/Almaty")
+                .query((rs, i) -> new HistoryItem(rs.getString("id"), rs.getBoolean("is_latest"), rs.getString("status"),
+                        rs.getString("created"), rs.getString("finished"), rs.getString("provider"), rs.getString("model"),
+                        rs.getBoolean("simulated"), rs.getInt("version_no"), rs.getBigDecimal("ai_total"), rs.getBigDecimal("final_total"),
+                        rs.getBoolean("gross"), (Integer) rs.getObject("tokens_in"), (Integer) rs.getObject("tokens_out"),
+                        (Integer) rs.getObject("tokens_cached"), rs.getBigDecimal("cost"), rs.getInt("appeals"), rs.getString("error_text")))
+                .list();
+    }
+
+    /** One past (or current) evaluation of the dialog, same shape as Conversation.evaluation. */
+    public Evaluation evaluationOf(String conversationId, long evaluationId) {
+        Integer n = db.sql("SELECT count(*) FROM evaluation WHERE id=:e AND conversation_id=:c")
+                .param("e", evaluationId).param("c", conversationId).query(Integer.class).single();
+        if (n == 0) throw ApiException.notFound("Оценка " + evaluationId + " диалога " + conversationId);
+        List<Message> messages = db.sql("SELECT seq, speaker, text, timestamp_raw, offset_sec FROM message WHERE conversation_id=:id ORDER BY seq")
+                .param("id", conversationId)
+                .query((rs, i) -> new Message(rs.getInt("seq"), rs.getString("speaker"), rs.getString("text"), rs.getString("timestamp_raw"),
+                        rs.getBigDecimal("offset_sec"), EvaluationRunner.timeLabel(rs.getBigDecimal("offset_sec"), rs.getString("timestamp_raw"))))
+                .list();
+        return evaluation(evaluationId, messages);
+    }
+
     private static String str(Object o) {
         return o == null ? null : o.toString();
     }

@@ -1,13 +1,15 @@
 {
   "name": "freedom-cqa-frontend",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "build:d365": "tsc --noEmit && vite build --mode d365",
+    "pack:d365": "npm run build:d365 && node scripts/pack-d365.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

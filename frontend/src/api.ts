@@ -1,7 +1,7 @@
 // Types and calls for the Spring Boot backend (backend/README.md, section "API").
 // Field names are exactly what the backend returns.
 
-const BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
+import { API_BASE as BASE } from './host';
 
 export type Role = 'OKK' | 'OPERATOR';
 export type EvalStatus = 'NOT_EVALUATED' | 'PENDING' | 'DONE' | 'FAILED';
@@ -64,6 +64,20 @@ export interface Route { language: string; provider: string; model: string }
 export interface Correction { id: string; criterionCode: string; criterionTitle: string; language: string; originalLabel: string; correctedLabel: string; reason: string; snippet: string; active: boolean; createdAtLabel: string }
 export interface ExportReport { path: string | null; written: boolean; count: number; ok: number; errors: number; warnings: string[]; file: unknown }
 export interface ImportRun { id: string; groupId: string; businessDate: string; status: string; total: number | null; imported: number | null; skipped: number | null; startedAtLabel: string; error: string | null }
+export interface HistoryItem {
+  id: string; latest: boolean; status: 'PENDING' | 'DONE' | 'FAILED'; createdAt: string; finishedAt: string | null;
+  provider: string; model: string; simulated: boolean; checklistVersion: number; originalScore: number | null; finalScore: number | null;
+  grossError: boolean; tokensIn: number | null; tokensOut: number | null; tokensCached: number | null; costUsd: number | null; appeals: number; error: string | null;
+}
+export interface Price { model: string; inputPerMtok: number | null; cachedPerMtok: number | null; outputPerMtok: number | null; used: boolean }
+export interface CostRow {
+  key: string; label: string; evaluations: number; unpriced: number; avgTokensIn: number | null; avgTokensCached: number | null; avgTokensOut: number | null;
+  avgChars: number | null; tokensPer1kChars: number | null; avgAttempts: number | null; avgLatencyMs: number | null;
+  avgCostUsd: number | null; totalCostUsd: number | null; costPer1000Usd: number | null; failedShare: number | null;
+}
+export interface CostReport { by: string; total: CostRow; rows: CostRow[] }
+/** What a batch evaluates: explicit dialogs (checkboxes) or everything matching the filters. */
+export type BatchTarget = { ids: string[] } | { filters: Filters; onlyNotEvaluated: boolean };
 export interface AudioSource { streamUrl: string | null; expiresAt: string | null; audioPageUrl: string | null }
 
 export type Filters = Partial<Record<
@@ -102,6 +116,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
 }
 
 const e = encodeURIComponent;
+const batchBody = (t: BatchTarget) => ('ids' in t ? { conversationIds: t.ids } : { filter: t.filters, onlyNotEvaluated: t.onlyNotEvaluated });
 
 export const api = {
   operators: () => request<Operator[]>('/operators'),
@@ -113,9 +128,11 @@ export const api = {
   audio: (id: string) => request<AudioSource>(`/conversations/${e(id)}/audio`),
   evaluate: (id: string, provider?: string) => request<{ evaluationId: string }>(`/conversations/${e(id)}/evaluate${qs({ provider })}`, 'POST'),
 
-  previewBatch: (filter: Filters, onlyNotEvaluated: boolean) => request<Preview>('/evaluations/batch/preview', 'POST', { filter, onlyNotEvaluated }),
-  startBatch: (filter: Filters, onlyNotEvaluated: boolean, provider?: string) =>
-    request<Batch>('/evaluations/batch', 'POST', { filter, onlyNotEvaluated, provider: provider || null }),
+  previewBatch: (t: BatchTarget) => request<Preview>('/evaluations/batch/preview', 'POST', batchBody(t)),
+  startBatch: (t: BatchTarget, provider?: string, model?: string) =>
+    request<Batch>('/evaluations/batch', 'POST', { ...batchBody(t), provider: provider || null, model: model || null }),
+  history: (id: string) => request<HistoryItem[]>(`/conversations/${e(id)}/evaluations`),
+  pastEvaluation: (id: string, evaluationId: string) => request<Evaluation>(`/conversations/${e(id)}/evaluations/${e(evaluationId)}`),
   batch: (id: string) => request<Batch>(`/evaluations/batch/${e(id)}`),
 
   checklists: () => request<Checklist[]>('/checklists/versions'),
@@ -138,6 +155,11 @@ export const api = {
   providers: () => request<Provider[]>('/llm/providers'),
   routes: () => request<Route[]>('/llm/routes'),
   saveRoute: (language: string, provider: string, model: string) => request<Route>(`/llm/routes/${e(language)}`, 'PUT', { provider, model }),
+  prices: () => request<Price[]>('/llm/prices'),
+  savePrice: (model: string, p: { inputPerMtok: number; cachedPerMtok: number | null; outputPerMtok: number }) =>
+    request<Price[]>(`/llm/prices/${e(model)}`, 'PUT', p),
+  cost: (by: string, f: { provider?: string; language?: string; since?: string; includeMock?: boolean }) =>
+    request<CostReport>(`/analytics/cost${qs({ by, ...f })}`),
   memo: () => request<{ text: string }>('/llm/memo'),
   saveMemo: (text: string) => request<{ text: string }>('/llm/memo', 'PUT', { text }),
 

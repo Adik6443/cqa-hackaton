@@ -1,10 +1,11 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { NavLink, Navigate, Route, Routes } from 'react-router';
 import {
-  BarChart3, BookCheck, Bot, BrainCircuit, FileOutput, MessagesSquare, Scale, Trophy, UserRound, Users,
+  BarChart3, BookCheck, Bot, BrainCircuit, Coins, FileOutput, MessagesSquare, Scale, Trophy, UserRound, Users,
 } from 'lucide-react';
 import { api, type Operator, type Role } from './api';
 import { useLoad } from './ui';
+import { host } from './host';
 import { DashboardPage } from './pages/Dashboard';
 import { ConversationsPage } from './pages/Conversations';
 import { ConversationPage } from './pages/ConversationCard';
@@ -14,6 +15,7 @@ import { ModelsPage } from './pages/Models';
 import { OperatorsPage } from './pages/Operators';
 import { CorrectionsPage } from './pages/Corrections';
 import { ResultsPage } from './pages/Results';
+import { CostPage } from './pages/Cost';
 
 // ---------- who is using the app (demo: no login, role switch in the top bar) ----------
 interface Session {
@@ -37,8 +39,9 @@ function write(key: string, v: string) {
 }
 
 function SessionProvider({ children }: { children: ReactNode }) {
-  const [role, setRoleState] = useState<Role>((read('cqa.role') as Role) || 'OKK');
-  const [operatorId, setOp] = useState<string | null>(read('cqa.operator'));
+  // Dynamics 365 can pass role / operator in the web resource "data" parameter
+  const [role, setRoleState] = useState<Role>(host.role ?? ((read('cqa.role') as Role) || 'OKK'));
+  const [operatorId, setOp] = useState<string | null>(host.operatorId ?? read('cqa.operator'));
   const [version, setVersion] = useState(0);
   const ops = useLoad(() => api.operators(), [version]);
   const operators = ops.data ?? [];
@@ -83,6 +86,7 @@ function Sidebar() {
             {link('/checklist', <BookCheck size={20} />, 'Чек-лист')}
             {link('/models', <Bot size={20} />, 'Модели AI')}
             {link('/corrections', <BrainCircuit size={20} />, 'Ошибки AI')}
+            {link('/cost', <Coins size={20} />, 'Стоимость AI')}
             <div className="nav-group">Команда и отчёты</div>
             {link('/operators', <Trophy size={20} />, 'Рейтинг операторов')}
             {link('/results', <FileOutput size={20} />, 'Сдача результатов')}
@@ -133,27 +137,38 @@ export function App() {
 function Shell() {
   const { role } = useSession();
   const okk = role === 'OKK';
+  if (host.embedded) {
+    // HTML component on a Dynamics 365 form: only the screen itself, Dynamics provides the navigation
+    return <main className="content embedded">{routes(okk)}</main>;
+  }
   return (
     <div className="shell">
       <Sidebar />
       <div className="main">
         <Topbar />
         <main className="content">
-          <Routes>
-            <Route path="/" element={<Navigate to={okk ? '/dashboard' : '/conversations'} replace />} />
-            <Route path="/dashboard" element={okk ? <DashboardPage /> : <Navigate to="/conversations" replace />} />
-            <Route path="/conversations" element={<ConversationsPage />} />
-            <Route path="/conversations/:id" element={<ConversationPage />} />
-            <Route path="/appeals" element={<AppealsPage />} />
-            <Route path="/checklist" element={okk ? <ChecklistPage /> : <Navigate to="/conversations" replace />} />
-            <Route path="/models" element={okk ? <ModelsPage /> : <Navigate to="/conversations" replace />} />
-            <Route path="/corrections" element={okk ? <CorrectionsPage /> : <Navigate to="/conversations" replace />} />
-            <Route path="/operators" element={<OperatorsPage />} />
-            <Route path="/results" element={okk ? <ResultsPage /> : <Navigate to="/conversations" replace />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          {routes(okk)}
         </main>
       </div>
     </div>
+  );
+}
+
+function routes(okk: boolean) {
+  return (
+    <Routes>
+      <Route path="/" element={<Navigate to={okk ? '/dashboard' : '/conversations'} replace />} />
+      <Route path="/dashboard" element={okk ? <DashboardPage /> : <Navigate to="/conversations" replace />} />
+      <Route path="/conversations" element={<ConversationsPage />} />
+      <Route path="/conversations/:id" element={<ConversationPage />} />
+      <Route path="/appeals" element={<AppealsPage />} />
+      <Route path="/checklist" element={okk ? <ChecklistPage /> : <Navigate to="/conversations" replace />} />
+      <Route path="/models" element={okk ? <ModelsPage /> : <Navigate to="/conversations" replace />} />
+      <Route path="/corrections" element={okk ? <CorrectionsPage /> : <Navigate to="/conversations" replace />} />
+      <Route path="/operators" element={<OperatorsPage />} />
+      <Route path="/cost" element={okk ? <CostPage /> : <Navigate to="/conversations" replace />} />
+      <Route path="/results" element={okk ? <ResultsPage /> : <Navigate to="/conversations" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }

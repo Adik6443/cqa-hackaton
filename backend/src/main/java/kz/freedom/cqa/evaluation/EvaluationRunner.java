@@ -85,7 +85,7 @@ public class EvaluationRunner {
         LlmClient client = router.client((String) ev.get("provider"));
         String model = (String) ev.get("model");
         int maxAttempts = Math.max(1, props.evaluation().maxAttempts());
-        int tokensIn = 0, tokensOut = 0;
+        int tokensIn = 0, tokensOut = 0, tokensCached = 0, promptChars = 0;
         long started = System.currentTimeMillis();
         String raw = null;
         List<String> errors = List.of();
@@ -98,6 +98,8 @@ public class EvaluationRunner {
             raw = reply.text();
             tokensIn += reply.tokensIn() == null ? 0 : reply.tokensIn();
             tokensOut += reply.tokensOut() == null ? 0 : reply.tokensOut();
+            tokensCached += reply.tokensCached() == null ? 0 : reply.tokensCached();
+            promptChars += system.length() + prompt.length();
             List<String> errs = new ArrayList<>();
             parsed = parse(raw, criteria, seqs, errs);
             errors = errs;
@@ -106,6 +108,8 @@ public class EvaluationRunner {
             if (errors.isEmpty()) break;
         }
         int latency = (int) (System.currentTimeMillis() - started);
+        db.sql("UPDATE evaluation SET tokens_cached=:c, prompt_chars=:pc WHERE id=:id")
+                .param("c", tokensCached).param("pc", promptChars).param("id", evaluationId).update();
         if (!errors.isEmpty()) {
             final String r = raw;
             final int ti = tokensIn, to = tokensOut;

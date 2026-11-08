@@ -33,17 +33,27 @@ public class HttpLlmClients {
         RestClient http = http(p);
         String key = p.llm().anthropicKey();
         return simple("ANTHROPIC", has(key), p.llm().anthropicModel(), req -> {
+            // Prompt caching: everything before the dialog is the same for every conversation,
+            // so it is marked as a cache breakpoint (reads cost ~10% of normal input).
+            String user = req.user();
+            int cut = user.indexOf(PromptBuilder.DIALOG_MARKER);
+            List<Map<String, Object>> content = cut > 0
+                    ? List.of(Map.of("type", "text", "text", user.substring(0, cut), "cache_control", Map.of("type", "ephemeral")),
+                              Map.of("type", "text", "text", user.substring(cut)))
+                    : List.of(Map.of("type", "text", "text", user));
             Map<String, Object> body = Map.of(
                     "model", req.model(),
                     "max_tokens", 4000,
                     "system", req.system(),
-                    "messages", List.of(Map.of("role", "user", "content", req.user())));
+                    "messages", List.of(Map.of("role", "user", "content", content)));
             JsonNode r = http.post().uri("https://api.anthropic.com/v1/messages")
                     .header("x-api-key", key).header("anthropic-version", "2023-06-01")
                     .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(JsonNode.class);
             StringBuilder text = new StringBuilder();
             r.path("content").forEach(c -> { if ("text".equals(c.path("type").asText())) text.append(c.path("text").asText()); });
-            return new LlmClient.Reply(text.toString(), r.path("usage").path("input_tokens").asInt(), r.path("usage").path("output_tokens").asInt());
+            JsonNode u = r.path("usage");
+            int read = u.path("cache_read_input_tokens").asInt(), write = u.path("cache_creation_input_tokens").asInt();
+            return new LlmClient.Reply(text.toString(), u.path("input_tokens").asInt() + read + write, u.path("output_tokens").asInt(), read);
         });
     }
 
@@ -62,8 +72,10 @@ public class HttpLlmClients {
             JsonNode r = http.post().uri("https://api.openai.com/v1/chat/completions")
                     .header("Authorization", "Bearer " + key)
                     .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(JsonNode.class);
+            JsonNode u = r.path("usage");   // OpenAI caches prompts > 1024 tokens automatically
             return new LlmClient.Reply(r.path("choices").path(0).path("message").path("content").asText(),
-                    r.path("usage").path("prompt_tokens").asInt(), r.path("usage").path("completion_tokens").asInt());
+                    u.path("prompt_tokens").asInt(), u.path("completion_tokens").asInt(),
+                    u.path("prompt_tokens_details").path("cached_tokens").asInt());
         });
     }
 
@@ -82,8 +94,10 @@ public class HttpLlmClients {
                     .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(JsonNode.class);
             StringBuilder text = new StringBuilder();
             r.path("candidates").path(0).path("content").path("parts").forEach(x -> text.append(x.path("text").asText()));
-            return new LlmClient.Reply(text.toString(), r.path("usageMetadata").path("promptTokenCount").asInt(),
-                    r.path("usageMetadata").path("candidatesTokenCount").asInt());
+            JsonNode u = r.path("usageMetadata");   // "thinking" tokens are billed as output
+            return new LlmClient.Reply(text.toString(), u.path("promptTokenCount").asInt(),
+                    u.path("candidatesTokenCount").asInt() + u.path("thoughtsTokenCount").asInt(),
+                    u.path("cachedContentTokenCount").asInt());
         });
     }
 

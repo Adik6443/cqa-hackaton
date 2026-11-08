@@ -31,6 +31,18 @@ public class ConversationController {
         return service.get(id);
     }
 
+    /** All evaluations of the dialog, newest first. A re-evaluation never deletes the previous one. */
+    @GetMapping("/{id}/evaluations")
+    public java.util.List<ConversationService.HistoryItem> history(@PathVariable String id) {
+        return service.history(id);
+    }
+
+    /** Full result of one past evaluation (criteria, explanations, evidence, appeal decisions). */
+    @GetMapping("/{id}/evaluations/{evaluationId}")
+    public ConversationService.Evaluation evaluation(@PathVariable String id, @PathVariable long evaluationId) {
+        return service.evaluationOf(id, evaluationId);
+    }
+
     /** Fresh mp3 link (it expires ~1 hour after it is issued), see AudioService. */
     @GetMapping("/{id}/audio")
     public AudioService.AudioSource audio(@PathVariable String id) {

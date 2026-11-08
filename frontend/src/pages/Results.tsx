@@ -47,7 +47,7 @@ export function ResultsPage() {
           <div className="step-head"><span className="step-num">2</span><h3>Оценить все диалоги группы</h3>{batch?.status === 'DONE' && <CheckCircle2 className="accent" />}</div>
           <p className="muted">Оцениваются только ещё не оценённые (и упавшие) диалоги этой группы.</p>
           <button className="btn btn-primary" disabled={!!busy || batch?.status === 'PENDING'}
-                  onClick={() => run('eval', async () => setBatch(await api.startBatch({ groupId: group.trim() }, true)))}>
+                  onClick={() => run('eval', async () => setBatch(await api.startBatch({ filters: { groupId: group.trim() }, onlyNotEvaluated: true })))}>
             <Play size={18} />Оценить
           </button>
           {batch && (

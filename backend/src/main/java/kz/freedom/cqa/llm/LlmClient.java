@@ -23,7 +23,12 @@ public interface LlmClient {
     /** ctx is used only by the MOCK provider (real providers read the prompt text). */
     record Request(String model, String system, String user, MockContext ctx) {}
 
-    record Reply(String text, Integer tokensIn, Integer tokensOut) {}
+    /** tokensIn = whole prompt incl. cached part; tokensCached = part of the prompt read from the provider cache. */
+    record Reply(String text, Integer tokensIn, Integer tokensOut, Integer tokensCached) {
+        public Reply(String text, Integer tokensIn, Integer tokensOut) {
+            this(text, tokensIn, tokensOut, 0);
+        }
+    }
 
     record MockContext(List<Criterion> criteria, List<PromptBuilder.Line> lines) {}
 }

@@ -9,3 +9,4 @@ backend/src/main/resources/application-local.properties
 backend/target/
 frontend/node_modules/
 frontend/dist/
+frontend/dist-d365/

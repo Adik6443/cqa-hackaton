@@ -13,6 +13,8 @@ import java.util.stream.Collectors;
  */
 @Component
 public class PromptBuilder {
+    /** Start of the per-dialog part of the prompt: everything before it is identical for all dialogs (cacheable). */
+    public static final String DIALOG_MARKER = "\n=== ДИАЛОГ ===\n";
     public static final String PROMPT_VERSION = "v2";
 
     public record Line(int seq, String time, String speaker, String text) {}
@@ -65,7 +67,7 @@ public class PromptBuilder {
                     .append(". Причина: ").append(x.reason()).append('\n')));
         }
 
-        sb.append("\n=== ДИАЛОГ ===\n");
+        sb.append(DIALOG_MARKER);
         sb.append("Канал: ").append("VOICE".equals(channel) ? "звонок (расшифровка речи)" : "чат").append('\n');
         sb.append("Язык диалога: ").append(language).append('\n');
         if (operatorStartSeq != null) sb.append("Оператор подключился с реплики #").append(operatorStartSeq).append(". Всё до неё — бот/меню, это контекст.\n");

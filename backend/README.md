@@ -15,7 +15,7 @@ Java 21+, Spring Boot 3.5, PostgreSQL (схема создаётся сама ч
 
 ## Куда пишутся данные и как их смотреть в pgAdmin
 
-Всё хранится в твоей локальной БД `cqa`, каждый запрос из Postman/фронта пишет туда строки. Query Tool:
+Всё хранится в твоей локальной БД `cqa`, каждый запрос из Postman/фронта пишет туда строки. Полный набор проверочных запросов по разделам (импорт, оценка, апелляции, память AI, чек-листы) — в [`sql/check_queries.sql`](sql/check_queries.sql): открой его в pgAdmin → Query Tool → Open File. Самое короткое:
 
 ```sql
 SELECT * FROM import_run ORDER BY id DESC;                    -- каждая загрузка от организаторов
@@ -108,6 +108,8 @@ operatorId, grossError, hasOpenAppeal, groupId, model`.
 ### Диалоги
 - `GET /conversations?<фильтр>&page=0&size=50` → `{items, total, page, size}`; в элементе также `durationSec/durationLabel`, `aiScore`, `provider/model`.
 - `GET /conversations/{id}` → поля списка + `operatorStartSeq`, `messages[{seq, role, text, timestampRaw, offsetSec, timeLabel}]`, `evaluation` (последняя): `originalScore` (AI), `finalScore` (после апелляций), `sections`, `results[{id, criterion, original, final, explanation, confidence, evidence[{messageSeq, offsetSec, quote}], decision, openAppealId}]`, `correctionsUsed`, `simulated`.
+- `GET /conversations/{id}/evaluations` — **история оценок** диалога, новые сверху: `[{id, latest, status, createdAt, provider, model, simulated, checklistVersion, originalScore, finalScore, grossError, tokensIn, tokensOut, tokensCached, costUsd, appeals}]`. Переоценка никогда не удаляет прошлую оценку (`is_latest=false`).
+- `GET /conversations/{id}/evaluations/{evaluationId}` — полный результат любой прошлой оценки (та же форма, что `evaluation`).
 - `GET /conversations/{id}/audio` → `{streamUrl, expiresAt, audioPageUrl}`. У чатов все null.
 
 ### Оценка
@@ -125,6 +127,11 @@ operatorId, grossError, hasOpenAppeal, groupId, model`.
 - `GET /llm/providers` → `[{provider, available, defaultModel}]` (`available=false` — нет ключа).
 - `GET /llm/routes`, `PUT /llm/routes/{RU|KZ|EN|DEFAULT}` `{provider, model}` — какая модель оценивает какой язык.
 - `GET /llm/memo`, `PUT /llm/memo` `{text}` — памятка для ОКК на этом экране.
+- `GET /llm/prices`, `PUT /llm/prices/{model}` `{inputPerMtok, cachedPerMtok, outputPerMtok}` — цены USD за 1 млн токенов (страница «Стоимость AI»).
+
+### Стоимость AI
+- `GET /analytics/cost?by=language|length|messages|model|languageModel|channel|attempts|corrections|checklist&provider=&language=&since=&includeMock=false` → `{total, rows[{label, evaluations, avgTokensIn, avgTokensCached, avgTokensOut, avgChars, tokensPer1kChars, avgAttempts, avgLatencyMs, avgCostUsd, costPer1000Usd, totalCostUsd}]}`. Считаются все запуски, включая переоценки и тесты моделей.
+- Стоимость = `(вход − кэш) × цена входа + кэш × цена кэша + выход × цена выхода`. Кэш: OpenAI кэширует общий префикс промпта сам; для Claude неизменная часть (инструкция + чек-лист + примеры ошибок) помечена `cache_control`; у Gemini «thinking»-токены считаются как выход.
 
 ### Апелляции и «обучение»
 - `POST /criterion-results/{id}/appeals?operatorId=` `{comment, desired:{value,isNa}|null}` → 201; 409 если уже открыта.
@@ -146,6 +153,5 @@ operatorId, grossError, hasOpenAppeal, groupId, model`.
 Юнит-тесты подсчёта баллов. Прогон на временной PostgreSQL: импорт 65 диалогов с настоящего API организаторов (повтор → 65 skipped), batch на MOCK 65/65, апелляция 100 → 90, база ошибок AI, переоценка с примером, аналитика, аудио-ссылка, results.json в формате 1.0, коды 400/409/503.
 
 ## Не сделано / следующий шаг
-- Реальные провайдеры не проверены вызовом: нужен ключ. Сравнить модели на 3 диалогах каждого языка.
 - Прокси аудио через бэкенд (если плеер в браузере не пускает прямую ссылку).
-- Стоимость в деньгах; история старых оценок в API.
+- Анализ звука (дикция, интонация, паузы) — описан как следующий этап, не реализован.

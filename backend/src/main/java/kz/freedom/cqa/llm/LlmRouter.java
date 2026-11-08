@@ -47,7 +47,7 @@ public class LlmRouter {
         LlmClient c = clients.get(provider.toUpperCase());
         if (c == null) throw ApiException.badRequest("Неизвестный провайдер: " + provider);
         if (!c.available())
-            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "PROVIDER_NO_KEY", "Для " + provider + " не задан API-ключ в .env");
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "PROVIDER_NO_KEY", "Для " + provider + " не задан API-ключ (application-local.properties)");
         return c;
     }
 
