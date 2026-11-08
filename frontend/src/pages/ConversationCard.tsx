@@ -28,8 +28,7 @@ export function ConversationPage() {
   const [highlight, setHighlight] = useState<number | null>(null);
   const [toast, setToast] = useState<{ text: string; tone?: 'ok' | 'danger' } | null>(null);
   const closeToast = useCallback(() => setToast(null), []);
-  const span = conv.data ? Math.max(0, ...conv.data.messages.map((m) => m.offsetSec ?? 0)) : 0;
-  const audio = useAudio(id, span);
+  const audio = useAudio(id);
 
   const evaluate = async () => {
     try { await api.evaluate(id); setToast({ text: 'Оценка запущена. Прошлая оценка сохранится в истории.' }); conv.reload(); }
@@ -314,28 +313,90 @@ const ROLE: Record<Message['role'], { label: string; icon: ReactNode }> = {
 const LEAD = 1;   // start a bit earlier so the first word is not cut
 const TAIL = 0.5;
 
-type AudioCtl = ReturnType<typeof useAudio>;
+/*
+ * Transcript time (offsetSec = seconds since the first message) vs time in the mp3 of a call.
+ * Checked on DEV calls p4-ru-001..005:
+ *  - the mp3 starts at the system message "Запись и транскрибирование запущены." (KZ "басталды", EN "started");
+ *    before it there is no sound (p4-ru-002: started at 30.2 s);
+ *  - the mp3 has no sound between "…приостановлены." and "…возобновлены." (13–19 s): that part is cut out;
+ *  - a message timestamp is the moment the phrase ENDS (speech recognition writes it after the phrase).
+ */
+const REC = /запис|record|жазу/i;
+const REC_RESUMED = /возобновл|resumed|жалғаст|қайта/i;
+const REC_PAUSED = /приостановл|paused|тоқтатыл|кідіртіл/i;
+const REC_STARTED = /запущен|started|басталды/i;
+
+interface RecTimeline { start: number; pauses: { from: number; to: number }[] }   // to = Infinity: never resumed
+
+const timelines = new WeakMap<Message[], RecTimeline>();
+
+function recordingTimeline(messages: Message[]): RecTimeline {
+  const cached = timelines.get(messages);
+  if (cached) return cached;
+  let start: number | null = null;
+  const pauses: { from: number; to: number }[] = [];
+  let pausedAt: number | null = null;
+  for (const m of messages) {
+    if (m.role !== 'system' || m.offsetSec === null || !REC.test(m.text)) continue;
+    const t = m.offsetSec;
+    if (REC_RESUMED.test(m.text)) {                     // before "started": KZ "қайта басталды" means resumed
+      if (pausedAt !== null && t > pausedAt) pauses.push({ from: pausedAt, to: t });
+      pausedAt = null;
+    } else if (REC_PAUSED.test(m.text)) {
+      if (pausedAt === null) pausedAt = t;
+    } else if (REC_STARTED.test(m.text)) {
+      if (start === null) start = t;
+    }
+  }
+  if (pausedAt !== null) pauses.push({ from: pausedAt, to: Infinity });
+  const tl = { start: start ?? 0, pauses: pauses.sort((a, b) => a.from - b.from) };
+  timelines.set(messages, tl);
+  return tl;
+}
 
 /**
- * Call messages have real timestamps (ISO); the backend stores offset_sec = seconds since the first message.
- * The mp3 is usually a few seconds shorter than the transcript, so when the transcript is longer
- * we map transcript time to audio time proportionally (offset × duration / transcript span).
+ * Transcript seconds → seconds in the mp3: offset − recording start − pauses that ended before this moment.
+ * A moment inside a pause maps to the start of the pause. The result is limited to [0, duration].
  */
-function useAudio(id: string, transcriptSpan: number) {
+export function toAudioTime(offsetSec: number, messages: Message[], duration?: number): number {
+  const { start, pauses } = recordingTimeline(messages);
+  let t = Math.max(offsetSec, start) - start;
+  for (const p of pauses) {
+    if (offsetSec >= p.to) t -= p.to - p.from;                         // the whole pause is before this moment
+    else if (offsetSec > p.from) { t -= offsetSec - p.from; break; }   // inside the pause → its start
+    else break;
+  }
+  const max = duration !== undefined && Number.isFinite(duration) ? duration : Infinity;
+  return Math.min(Math.max(t, 0), max);
+}
+
+/** Seconds in the mp3 → transcript seconds (inverse of toAudioTime). */
+export function fromAudioTime(audioSec: number, messages: Message[]): number {
+  const { start, pauses } = recordingTimeline(messages);
+  let t = start + Math.max(audioSec, 0);
+  for (const p of pauses) {
+    if (t < p.from) break;
+    if (!Number.isFinite(p.to)) return p.from;           // the recording never resumed
+    t += p.to - p.from;
+  }
+  return t;
+}
+
+type AudioCtl = ReturnType<typeof useAudio>;
+
+function useAudio(id: string) {
   const ref = useRef<HTMLAudioElement | null>(null);
   const [src, setSrc] = useState<AudioSource | null>(null);
   const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle');
   const [playing, setPlaying] = useState(false);
-  const [time, setTime] = useState<number | null>(null);   // current position in transcript seconds
-  const stopAt = useRef<number | null>(null);               // audio seconds where the fragment ends
+  const [time, setTime] = useState<number | null>(null);   // current position in TRANSCRIPT seconds
+  const stopAt = useRef<number | null>(null);               // mp3 seconds where the fragment ends
   const pending = useRef<{ from: number; to: number | null } | null>(null);
-  const spanRef = useRef(transcriptSpan);
-  spanRef.current = transcriptSpan;
+  const messagesRef = useRef<Message[]>([]);               // messages of this call, for both mappings
 
-  const ratio = () => {
+  const duration = () => {
     const d = ref.current?.duration;
-    if (!d || !Number.isFinite(d) || spanRef.current <= d) return 1;
-    return d / spanRef.current;
+    return d && Number.isFinite(d) ? d : undefined;
   };
 
   const load = useCallback(async () => {
@@ -347,16 +408,18 @@ function useAudio(id: string, transcriptSpan: number) {
     } catch { setState('error'); }
   }, [id]);
 
+  /** from / to are transcript seconds; converted to mp3 seconds here. */
   const start = (from: number, to: number | null) => {
     const a = ref.current;
     if (!a) return;
-    const k = ratio();
-    a.currentTime = Math.max(0, from * k - LEAD);
-    stopAt.current = to === null ? null : to * k + TAIL;
+    const messages = messagesRef.current;
+    const d = duration();
+    a.currentTime = Math.max(0, toAudioTime(from, messages, d) - LEAD);
+    stopAt.current = to === null ? null : Math.min(toAudioTime(to, messages, d) + TAIL, d ?? Infinity);
     void a.play().catch(() => undefined);
   };
 
-  /** Play transcript seconds [from, to). Loads the recording first if needed. */
+  /** Play transcript seconds [from, to]. Loads the recording first if needed. */
   const playRange = (from: number, to: number | null) => {
     if (ref.current && ref.current.readyState >= 1) start(from, to);
     else {
@@ -365,16 +428,22 @@ function useAudio(id: string, transcriptSpan: number) {
     }
   };
 
+  /** A message is heard from the end of the PREVIOUS message (timestamps mark the end of a phrase) to its own end. */
   const playMessage = (messages: Message[], seq: number) => {
+    messagesRef.current = messages;
     const i = messages.findIndex((m) => m.seq === seq);
     const m = messages[i];
     if (!m || m.offsetSec === null) return;
-    const from = m.offsetSec;
-    const next = messages.slice(i + 1).find((n) => n.offsetSec !== null && n.offsetSec > from);
-    playRange(from, next?.offsetSec ?? null);
+    const end = m.offsetSec;
+    const prev = messages.slice(0, i).reverse().find((p) => p.offsetSec !== null && p.offsetSec <= end);
+    const from = prev?.offsetSec ?? recordingTimeline(messages).start;
+    playRange(Math.min(from, end), end);
   };
 
   const stop = () => { stopAt.current = null; ref.current?.pause(); };
+
+  /** Messages of the open call: needed also when the user plays or seeks in the player directly. */
+  const setMessages = (messages: Message[]) => { messagesRef.current = messages; };
 
   const events = {
     onLoadedMetadata: () => {
@@ -385,7 +454,7 @@ function useAudio(id: string, transcriptSpan: number) {
     onTimeUpdate: () => {
       const a = ref.current;
       if (!a) return;
-      setTime(a.currentTime / ratio());
+      setTime(fromAudioTime(a.currentTime, messagesRef.current));
       if (stopAt.current !== null && a.currentTime >= stopAt.current) { a.pause(); stopAt.current = null; }
     },
     onPlay: () => setPlaying(true),
@@ -394,7 +463,7 @@ function useAudio(id: string, transcriptSpan: number) {
     onError: () => { setSrc(null); setState('error'); setPlaying(false); },   // link expired: next click asks again
   };
 
-  return { ref, src, state, playing, time, load, playMessage, stop, events };
+  return { ref, src, state, playing, time, load, playMessage, stop, setMessages, events };
 }
 
 const fmtClock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
@@ -406,11 +475,14 @@ function Transcript({ c, highlight, audio }: { c: Conversation; highlight: numbe
   const [showBot, setShowBot] = useState(false);
   useEffect(() => { if (highlight !== null && start && highlight < start) setShowBot(true); }, [highlight, start]);
 
-  // message that is being played right now (last one whose offset is <= current time;
-  // + LEAD so the clicked message lights up at once, not after the 1-second lead-in)
+  // message heard right now: a timestamp is the END of a phrase, so it is the first message whose end
+  // (in mp3 time) is at or after the player position. System messages are events, not speech: skipped.
+  if (voice) audio.setMessages(c.messages);
   let nowSeq: number | null = null;
   if (voice && audio.playing && audio.time !== null) {
-    for (const m of c.messages) if (m.offsetSec !== null && m.offsetSec <= audio.time + LEAD + 0.05) nowSeq = m.seq;
+    const playerSec = toAudioTime(audio.time, c.messages);
+    const now = c.messages.find((m) => m.role !== 'system' && m.offsetSec !== null && toAudioTime(m.offsetSec, c.messages) >= playerSec);
+    nowSeq = now?.seq ?? null;
   }
   useEffect(() => { if (nowSeq !== null && start && nowSeq < start) setShowBot(true); }, [nowSeq, start]);
 
